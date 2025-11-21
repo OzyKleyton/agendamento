@@ -4,6 +4,7 @@ import (
 	"github.com/OzyKleyton/agendamento-api/internal/model"
 	"github.com/OzyKleyton/agendamento-api/internal/model/user"
 	"github.com/OzyKleyton/agendamento-api/internal/repository"
+	"github.com/OzyKleyton/agendamento-api/utils/security"
 )
 
 type UserService interface {
@@ -26,6 +27,13 @@ func NewUserService(repo repository.UserRepository) UserService {
 
 func (us *UserServiceImpl) CreateUser(userReq *user.UserReq) *model.Response {
 	user := userReq.ToUser()
+
+	hashedPassword, err := security.GenerateEncryptedPassword(userReq.Password)
+	if err != nil {
+		return model.NewErrorResponse(err, 500)
+	}
+
+	user.Password = hashedPassword
 
 	createUser, err := us.repo.Create(user)
 	if err != nil {
