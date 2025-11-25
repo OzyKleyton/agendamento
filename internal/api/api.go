@@ -9,14 +9,16 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/gofiber/fiber/v2"
 	"github.com/OzyKleyton/agendamento-api/config"
 	"github.com/OzyKleyton/agendamento-api/config/db"
 	"github.com/OzyKleyton/agendamento-api/internal/api/handler"
+	"github.com/OzyKleyton/agendamento-api/internal/api/middleware"
 	"github.com/OzyKleyton/agendamento-api/internal/api/router"
 	"github.com/OzyKleyton/agendamento-api/internal/model/user"
 	"github.com/OzyKleyton/agendamento-api/internal/repository"
 	"github.com/OzyKleyton/agendamento-api/internal/service"
+	jwt "github.com/OzyKleyton/agendamento-api/utils/auth"
+	"github.com/gofiber/fiber/v2"
 )
 
 func Run(host, port string) error {
@@ -46,13 +48,25 @@ func Run(host, port string) error {
 		return err
 	}
 
+	// Repositories
 	userRepo := repository.NewUserRepository(db)
 
+	// JWT
+	jwtUtil := jwt.NewJWT()
+
+	// Services
 	userService := service.NewUserService(userRepo)
+	authService := service.NewAuthService(userRepo, jwtUtil)
 
+	// Handlers
 	userHandler := handler.NewUserHandler(userService)
+	authHandler := handler.NewAuthHandler(authService)
 
-	router.SetupRouter(app, userHandler.Routes())
+	// Middleware
+	authMiddleware := middleware.NewAuthMiddleware(authService)
+
+	// Setup das rotas seguindo sua estrutura
+	setupRoutes(app, authMiddleware, authHandler, userHandler)
 
 	c := make(chan os.Signal, 1)
 	errc := make(chan error, 1)
@@ -61,7 +75,7 @@ func Run(host, port string) error {
 		<-c
 		fmt.Println("Gracefully shutting down...")
 		cancel()
-		errc <-app.Shutdown()
+		errc <- app.Shutdown()
 	}()
 
 	if err := app.Listen(address); err != nil {
@@ -71,4 +85,16 @@ func Run(host, port string) error {
 	err = <-errc
 
 	return err
+}
+
+func setupRoutes(app *fiber.App, authMiddleware *middleware.AuthMiddleware, authHandler *handler.AuthHandler, userHandler *handler.UserHandler) {
+	allRoutes := func(route fiber.Router) {
+		authHandler.Routes()(route)
+
+		protected := route.Group("")
+		protected.Use(authMiddleware.Validate())
+		userHandler.Routes()(protected)
+	}
+
+	router.SetupRouter(app, allRoutes)
 }
